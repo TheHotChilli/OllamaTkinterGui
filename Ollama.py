@@ -6,11 +6,12 @@ from urllib.parse import urlparse
 
 
 class OllamaClient:
-    def __init__(self, base_url:str ="http://localhost:11434") -> None:
+    def __init__(self, base_url: str = "http://localhost:11434") -> None:
         self.base_url = base_url
-        self._session = re.Session()
-
-    def generate(self, model:str, prompt:str,system:str=None, stream:bool=False) -> dict:
+        parsed_url = urlparse(base_url)
+        self._HTTPclient = http.client.HTTPConnection(parsed_url.netloc)
+    
+    def generate(self, model:str, prompt:str,system:str=None) -> dict:
         # input checks
         if not model:
             raise ValueError("No model provided.")
@@ -19,28 +20,21 @@ class OllamaClient:
         body = {
             "model": model,
             "prompt": prompt,
-            "stream": stream
+            "stream": False
         }
         if system:
             body["system": system]
 
         # perform API request
-        response = self._session.post(
-            url=self.base_url+"/api/generate",
-            proxies={"no":"pass"},   # workaround to disable global proxy, see https://github.com/psf/requests/issues/879
-            json=body
-        )
-        if not response.status_code == 200:
+        headers = {'Content-type': 'application/json'}
+        self._HTTPclient.request("POST", "/api/generate", json.dumps(body), headers)
+        response = self._HTTPclient.getresponse()
+
+        if not response.status == 200:
             raise AssertionError(f"Ollama Server returns http status code: {response.status_code}")
 
-        if not stream:
-            return json.loads(response.content.decode())
-        else:
-            stream_snippets = []
-            for elem in response.content.decode().split("\n")[0:-1]:
-                stream_snippets.append(json.loads(elem))
-            return stream_snippets
-    
+        return json.loads(response.read().decode())
+
     def chat(self, model:str, messages:list) -> dict:
         # input checks
         if not model:
@@ -53,26 +47,97 @@ class OllamaClient:
             if "content" not in message:
                 raise ValueError("Messages must contain content")
 
+        # prepare API body
+        body = {
+            "model": model,
+            "messages": messages,
+            "stream": False
+        }
+
         # perform API request
-        response = self._session.post(
-            url=self.base_url+"/api/chat",
-            proxies={"no":"pass"},   # workaround to disable global proxy, see https://github.com/psf/requests/issues/879
-            json={"model":model,
-                  "messages":messages,
-                  "stream":False
-                  }
-        )
-        if not response.status_code == 200:
+        headers = {'Content-type': 'application/json'}
+        self._HTTPclient.request("POST", "/api/chat", json.dumps(body), headers)
+        response = self._HTTPclient.getresponse()
+        if not response.status == 200:
             raise AssertionError(f"Ollama Server returns http status code: {response.status_code}")
-        return json.loads(response.content.decode())
+        return json.loads(response.read().decode())
 
     def list_models(self) -> None:
-        response = self._session.get(
-            url=self.base_url+"/api/tags"
-        )
-        if not response.status_code == 200:
+        self._HTTPclient.request("GET", "/api/tags")
+        response = self._HTTPclient.getresponse()
+        if not response.status == 200:
             raise AssertionError(f"Ollama Server returns http status code: {response.status_code}")
-        return json.loads(response.content.decode())
+        return json.loads(response.read().decode())
+
+
+# class OllamaClientRequests:
+#     def __init__(self, base_url:str ="http://localhost:11434") -> None:
+#         self.base_url = base_url
+#         self._session = re.Session()
+
+#     def generate(self, model:str, prompt:str,system:str=None, stream:bool=False) -> dict:
+#         # input checks
+#         if not model:
+#             raise ValueError("No model provided.")
+        
+#         # prepare API body
+#         body = {
+#             "model": model,
+#             "prompt": prompt,
+#             "stream": stream
+#         }
+#         if system:
+#             body["system": system]
+
+#         # perform API request
+#         response = self._session.post(
+#             url=self.base_url+"/api/generate",
+#             proxies={"no":"pass"},   # workaround to disable global proxy, see https://github.com/psf/requests/issues/879
+#             json=body
+#         )
+#         if not response.status_code == 200:
+#             raise AssertionError(f"Ollama Server returns http status code: {response.status_code}")
+
+#         if not stream:
+#             return json.loads(response.content.decode())
+#         else:
+#             stream_snippets = []
+#             for elem in response.content.decode().split("\n")[0:-1]:
+#                 stream_snippets.append(json.loads(elem))
+#             return stream_snippets
+    
+#     def chat(self, model:str, messages:list) -> dict:
+#         # input checks
+#         if not model:
+#             raise ValueError("No model provided.")
+#         for message in messages:
+#             if not isinstance(message, dict):
+#                 raise TypeError("Messages must be a list of dict-like objects")
+#             if not (role := message.get("role")) or role not in ["system", "user", "assistant"]:
+#                 raise ValueError('messages must contain a role and it must be one of "system", "user", or "assistant"')
+#             if "content" not in message:
+#                 raise ValueError("Messages must contain content")
+
+#         # perform API request
+#         response = self._session.post(
+#             url=self.base_url+"/api/chat",
+#             proxies={"no":"pass"},   # workaround to disable global proxy, see https://github.com/psf/requests/issues/879
+#             json={"model":model,
+#                   "messages":messages,
+#                   "stream":False
+#                   }
+#         )
+#         if not response.status_code == 200:
+#             raise AssertionError(f"Ollama Server returns http status code: {response.status_code}")
+#         return json.loads(response.content.decode())
+
+#     def list_models(self) -> None:
+#         response = self._session.get(
+#             url=self.base_url+"/api/tags"
+#         )
+#         if not response.status_code == 200:
+#             raise AssertionError(f"Ollama Server returns http status code: {response.status_code}")
+#         return json.loads(response.content.decode())
 
 
 # class AsyncOllamaClientRequests:
@@ -186,6 +251,9 @@ class AsyncOllamaClient:
         return json.loads(response_str)
 
 
+#----------------------------------------------------------------------
+
+
 class Ollama:
     def __init__(self, model:str="llama3", system:str=None, base_url:str ="http://localhost:11434") -> None:
         self.base_url = base_url
@@ -240,6 +308,9 @@ class Ollama:
         self.messages.append({"role":"assistant", "content":msg_str})
 
 
+#----------------------------------------------------------------------
+
+
 async def async_test_client():
     AsyncClient = AsyncOllamaClient()
     model = "llama3"
@@ -259,23 +330,23 @@ async def async_test_model():
     print(LLM.messages)
 
 if __name__ == "__main__":
-    ## synchron client test
-    # client = OllamaClient()
-    # response = client.generate("llama3", "Who are you?")
-    # print(response)
+    # synchron client test
+    client = OllamaClient()
+    response = client.generate("llama3", "Who are you?")
+    print(response)
 
     # synchron model test
-    # LLM = Ollama(model="llama3")
-    # a1 = LLM.chat("My name is tom!")
-    # a2 = LLM.chat("What is my name?")
-    # models_list = LLM.list_models()
-    # print(LLM.list_models())
+    LLM = Ollama(model="llama3")
+    a1 = LLM.chat("My name is tom!")
+    a2 = LLM.chat("What is my name?")
+    models_list = LLM.list_models()
+    print(LLM.list_models())
 
     ## asynchron client test
     # chunks = asyncio.run(async_test_client())
 
     ## asynchron model test
-    asyncio.run(async_test_model())
+    # asyncio.run(async_test_model())
 
 
 
