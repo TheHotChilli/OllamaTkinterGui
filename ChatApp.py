@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import scrolledtext, messagebox, END, ttk
 import tkinter.font as tkFont
+import threading
 import asyncio
 from asyncio import Event
 from Ollama import Ollama
@@ -8,8 +9,9 @@ from Ollama import Ollama
 
 class ChatApp:
     def __init__(self):
-        # model instance
+        # Ollama
         self.ollama = Ollama(model="llama3")
+        self.ollama_thread = None  # To track the current sending thread
 
         # Main GUI window
         self.root = tk.Tk()
@@ -19,22 +21,22 @@ class ChatApp:
 
         # Set font and background color
         self.custom_font = tkFont.Font(family="Helvetica", size=12)
-        self.root.option_add("*Font", self.custom_font) # set font of all widgets in root
+        self.root.option_add("*Font", self.custom_font)  # Set font of all widgets in root
         self.root.configure(bg='#2E2E2E')  # Set a dark background
 
         # Chat history
-        self.chat_history = scrolledtext.ScrolledText(self.root, width=60, height=20, wrap=tk.WORD, 
+        self.chat_history = scrolledtext.ScrolledText(self.root, width=60, height=20, wrap=tk.WORD,
                                                       bg='#1E1E1E', fg='#D3D3D3', insertbackground='white')
         self.chat_history.grid(row=0, column=0, columnspan=4, padx=10, pady=10, sticky="nsew")
 
         # User input
-        self.input_field = scrolledtext.ScrolledText(self.root, width=40, height=4, wrap=tk.WORD, 
+        self.input_field = scrolledtext.ScrolledText(self.root, width=40, height=6, wrap=tk.WORD,
                                                      bg='#1E1E1E', fg='#D3D3D3', insertbackground='white')
         self.input_field.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
-        self.input_field.bind("<KeyPress-Return>", self.enter_pressed_callback)   
+        self.input_field.bind("<KeyPress-Return>", self.enter_pressed_callback)
 
         # Send button
-        self.send_button = tk.Button(self.root, text="Send", command=self.send_message, bg='#6D8764', fg='white')
+        self.send_button = tk.Button(self.root, text="Send", command=self.start_send_message, bg='#6D8764', fg='white')
         self.send_button.grid(row=1, column=1, padx=10, pady=10, sticky="nsew")
 
         # Copy button
@@ -44,29 +46,49 @@ class ChatApp:
         # Config button
         self.config_button = tk.Button(self.root, text="Config", command=self.open_config_window, bg='#6D8764', fg='white')
         self.config_button.grid(row=1, column=3, padx=10, pady=10, sticky="nsew")
-        
+
         # Grid configuration to make widgets resize with the window
-        self.root.grid_rowconfigure(0, weight=1)
-        self.root.grid_rowconfigure(1, weight=0)
+        self.root.grid_rowconfigure(0, weight=5)
+        self.root.grid_rowconfigure(1, weight=1)
         self.root.grid_columnconfigure(0, weight=1)
         self.root.grid_columnconfigure(1, weight=0)
         self.root.grid_columnconfigure(2, weight=0)
         self.root.grid_columnconfigure(3, weight=0)
 
+    def start_send_message(self):
+        # Start the send_message function in a new thread
+        if self.ollama_thread and self.ollama_thread.is_alive():
+            messagebox.showinfo("Info", "Please wait for the current request to finish.")
+        else:
+            self.ollama_thread = threading.Thread(target=self.send_message, daemon=True)
+            self.ollama_thread.start()
+
     def send_message(self):
+        # read user input
         user_input = self.input_field.get("1.0", END).strip()
         if not user_input.strip():
             messagebox.showwarning("Warning", "Input field cannot be empty.")
             return
-        self.chat_history.insert(tk.END, f"{user_input}\n", "user_color")
-        self.chat_history.tag_config("user_color", foreground="white")
-        response = self.ollama.chat(user_input)
-        # response = self.client.generate(model="llama3", prompt=user_input)
-        # response = "Test Response"  
-        self.chat_history.insert(tk.END, f"{response}\n\n", "assistant_color")
-        self.chat_history.tag_config("assistant_color", foreground="#87CEEB")
+        # request from Ollama
+        try:
+            # call Ollama API
+            response = self.ollama.chat(user_input)
+            # write/move user_input to chat history window
+            self.chat_history.insert(tk.END, f"{user_input}\n", "user_color")
+            self.chat_history.tag_config("user_color", foreground="white")
+            # write LLM response to chat history window
+            self.chat_history.insert(tk.END, f"{response}\n\n", "assistant_color")
+            self.chat_history.tag_config("assistant_color", foreground="#87CEEB")
+            # store the response
+            self.last_response = response  
+        except Exception as e:
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+        # remove content from input_field
         self.input_field.delete("1.0", END)
-        self.last_response = response  # Store the last response
+
+    def cancel_request(self):
+        # Set the cancellation event to stop the ongoing request
+        self.cancel_event.set()
 
     def enter_pressed_callback(self, event):
         if event.state == 0:  # only send_message if ENTER is not modified by other keys (e.g ALT+ENTER)
